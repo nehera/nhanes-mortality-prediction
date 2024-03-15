@@ -1,0 +1,59 @@
+---
+title: "Visualize MTF Images"
+author: "Aidan Neher"
+format: html
+editor: visual
+---
+
+## Load Images
+
+```{r}
+
+# Load packages
+library(tidyverse)
+library(reticulate) # We use reticulate to load numpy
+
+np <- import("numpy")
+# Use numpy modul to load mtf images
+mtf_images <- np$load("data/mtf_images.npy")
+dim(mtf_images)
+
+```
+
+## Visualize MTF Images
+
+```{r}
+
+make_mtf_heatmap <- function(image_matrix) {
+  # Reshape `image_matrix` (240x240 matrix)
+  image_data <- image_matrix %>%
+    as.matrix() %>%
+    as.table() %>%
+    as.data.frame()
+  colnames(image_data) <- c("x", "y", "value")
+  # Make heatmap
+  mtf_heatmap <- ggplot(image_data, 
+                        aes(x = x, y = y, fill = value)) +
+    geom_tile() +
+    scale_fill_gradient(low = "blue", high = "red") +
+    coord_fixed() +  # Keep aspect ratio fixed
+    theme_minimal() +
+    theme(axis.text = element_blank(),  # Hide axis text
+          axis.ticks = element_blank(),  # Hide axis ticks
+          axis.title = element_blank(),
+          legend.position = "none") # Hide axis titles
+  return(mtf_heatmap)
+}
+
+# Plot 3 subjects' mtf images
+mtf_heatmaps <- apply(mtf_images, 1, make_mtf_heatmap)
+
+library(patchwork) # For plotting on one figure 
+combined_plot <- mtf_heatmaps[[1]] + 
+  mtf_heatmaps[[2]] + mtf_heatmaps[[3]] + 
+  plot_layout(ncol = 3) +
+  theme(legend.position = "bottom")
+
+combined_plot
+
+```
