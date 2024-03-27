@@ -36,7 +36,7 @@ print(f"Conversion completed in {duration} seconds.")
 
 # Now, `mtf_images` is your 3D array containing all MTF images
 
-# Save the array to an HDF5 file for R compatibility
+# Save the array to a numpy file, which can be imported into R as an array using the reticulate package
 np.save('data/mtf_images.npy', mtf_images)
 
 print("MTF images saved to 'mtf_images.npy'.")

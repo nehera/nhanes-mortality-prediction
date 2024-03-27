@@ -56,4 +56,7 @@ combined_plot <- mtf_heatmaps[[1]] +
 
 combined_plot
 
+ggsave("figures/combined_heatmaps_with_single_legend.png",
+       combined_plot, width = 20, height = 7, units = "cm")
+
 ```
