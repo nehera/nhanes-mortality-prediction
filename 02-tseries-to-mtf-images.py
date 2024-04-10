@@ -4,7 +4,8 @@ from pyts.image import MarkovTransitionField
 import time
 
 # Load the time series data
-df = pd.read_csv('data/binned_sl_AC_sample.csv')
+df = pd.read_csv('data/act_bin_sl_D.csv')
+df.drop('SEQN', inplace=True, axis=1) # Remove unique identifiers for image processing
 
 # Parameters
 n_series = len(df)
@@ -24,7 +25,9 @@ for i, (index, row) in enumerate(df.iterrows()):
     time_series = row.values.reshape(1, -1)
     mtf_image = mtf.fit_transform(time_series)
     mtf_images[i, :, :] = mtf_image
-    
+    if i % 200 == 0:
+        print(f"Processing at index: {i}")
+
 # End timing
 end_time = time.time()
 
@@ -37,6 +40,6 @@ print(f"Conversion completed in {duration} seconds.")
 # Now, `mtf_images` is your 3D array containing all MTF images
 
 # Save the array to a numpy file, which can be imported into R as an array using the reticulate package
-np.save('data/mtf_images.npy', mtf_images)
+np.save('data/mtf_images_D.npy', mtf_images)
 
 print("MTF images saved to 'mtf_images.npy'.")
