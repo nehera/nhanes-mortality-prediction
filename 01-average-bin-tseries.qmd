@@ -208,7 +208,7 @@ Let's start by removing objects we don't care about (e.g. multi-level data) for 
 
 ```{r}
 
-rm(act_cnt_ml, data_analysis, mort_cov, PAXINTEN_C, PAXINTEN_D)
+# rm(act_cnt_ml, data_analysis, mort_cov, PAXINTEN_C, PAXINTEN_D)
 
 AC <- matrix(act_cnt_sl$AC, nrow = nrow(act_cnt_sl), byrow = TRUE)
 
@@ -241,7 +241,7 @@ AC_long <- AC_df %>%
     values_to = "activity_level",
     names_prefix = "minute_"
   ) %>%
-  mutate(minute = str_remove(AC_long$minute, "V") %>% as.integer()) %>%
+  mutate(minute = str_remove(minute, "V") %>% as.integer()) %>%
   mutate(bin_index = (minute - 1) %/% 6 + 1)
 
 # Calculate the mean for each bin
@@ -261,50 +261,35 @@ AC_wide <- AC_binned %>%
   )
 
 # Remove intermediate objects
-rm(AC_df, AC_long, AC_binned)
+# rm(AC_df, AC_long, AC_binned)
 
 ```
 
-Now we explore and save our binned single-level activity data: We start by visualizing 3 subjects' binned tseries and then store both this subsample of subjects and the entirety of the binned data.frame. 
+We re-split our single-level activity data into waves C and D to store them for translation to images by the Markov Transition Field method.
 
 ```{r}
 
-# Reshape data of interest for plotting
-plot_df <- AC_wide[1:3, ] %>% pivot_longer(
-    -observation_id, 
-    names_to = "bin",
-    values_to = "avg_activity"
-  ) %>%
-  mutate(bin = str_remove(bin, "bin_") %>% as.integer(),
-         observation_id = as.factor(observation_id)) 
+# Re-split activity data into waves C and D
+ids_C <- unique(PAXINTEN_C$SEQN)
+index_C <- which(act_cnt_sl$SEQN %in% ids_C)
+AC_df <- AC_df %>%
+  select(-observation_id) %>%
+  mutate(SEQN = act_cnt_sl$SEQN)
+act_bin_sl_C <- AC_df[index_C, ]
+act_bin_sl_D <- AC_df[-index_C, ]
 
-# Plot all tseris, colored by observation index
-my_plot <- ggplot(plot_df, aes(x = bin, y = avg_activity, color = observation_id)) + 
-  geom_line() +  
-  labs(
-    title = "Average Daily Activity by Subject ID",
-    x = "Bin (6-minute intervals)",
-    y = "Average Activity Level",
-    color = "Subject ID"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5),
-    legend.position = "bottom",
-    legend.title.align = 0.5
-  ) +
-  scale_x_continuous(breaks = seq(0, 240, 20)) # Adjust x-axis ticks for better readability
+# Store single-level averaged and 6-minute binned data
 
-# Print the plot
-my_plot
-
-# Write out the plot
-ggsave("my_plot.jpeg", plot = my_plot, width = 8, height = 6, dpi = 300)
-
-# Store binned data
-
-write.csv(AC_wide[1:3, ], file = "binned_sl_AC_sample.csv")
-write.csv(AC_wide, file = "binned_sl_AC.csv")
+write.csv(act_bin_sl_C, file = "data/act_bin_sl_C.csv")
+write.csv(act_bin_sl_D, file = "data/act_bin_sl_D.csv")
 
 ```
 
+Check mortality missingness/ censoring:
+
+```{r}
+
+Mortality_2015_D$mortstat
+intersect(Mortality_2015_D$SEQN[which(!is.na(Mortality_2015_D$mortstat))], act_bin_sl_D$SEQN) %>% length
+
+```
