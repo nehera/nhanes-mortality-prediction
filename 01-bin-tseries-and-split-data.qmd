@@ -1,9 +1,11 @@
 ---
-title: "NHANES Activity Time Series to Images"
+title: "Binning NHANES Activity Time Series and Splitting Mortality, Covariates, and Activity Data into Train, Valid, Test Sets"
 author: "Aidan Neher"
 format: html
 editor: visual
 ---
+
+# NHANES Tutorial
 
 ## Introduction
 
@@ -20,8 +22,11 @@ For activity count data, "PAXINTEN\_\*" are matrices of count values and "FLAG\_
 ## Load Data
 
 ```{r load data, message=FALSE}
-## load package
+
+library(tidyverse)
 library(rnhanesdata)
+library(caret)
+
 ```
 
 Since all processed data have been stored in the `rnhanesdata` package, all we need to do is to load this package. We can also download raw data of other categories from [NHANES website](https://www.cdc.gov/nchs/nhanes/index.htm) and combine them with the processed data when needed.
@@ -178,75 +183,81 @@ act_cnt_ml2sl <- act_cnt_ml %>% filter(n_good_days >= 3) %>%
   select(SEQN, AC, TAC, TLAC, ST, MVPA, WT, n_good_days)
 
 ## compress activity count data into participant level
-act_cnt_sl <- aggregate(act_cnt_ml2sl[,3:ncol(act_cnt_ml2sl)], 
+act_cnt_sl_summary <- aggregate(act_cnt_ml2sl[,3:ncol(act_cnt_ml2sl)], 
                         list(SEQN = act_cnt_ml2sl$SEQN), mean)
 ### for the count value matrix stored in "AC" column, we have to do aggregation manually
 inx_row <- split(1:nrow(act_cnt_ml2sl), f = factor(act_cnt_ml2sl$SEQN))
-act_cnt_sl$AC <- I(t(vapply(inx_row, function(x) 
+act_cnt_sl_tseries <- I(t(vapply(inx_row, function(x) 
                    colMeans(act_cnt_ml2sl$AC[x,,drop=FALSE],na.rm=TRUE),
                    numeric(ncol(act_cnt_ml2sl$AC)))))
-dim(act_cnt_sl)
-str(act_cnt_sl)
 
-rm(act_cnt_ml2sl, inx_row)
+dim(act_cnt_sl_summary)
+str(act_cnt_sl_summary)
+dim(act_cnt_sl_tseries)
+
+rm(act_cnt_ml, act_cnt_ml2sl, inx_row)
 ```
 
-The data frame `act_cnt_sl` contains participant-level activity count data. We next merge activity count data with mortality and covariate data.
-
-```{r}
-## merge activity count data and other data
-data_analysis <- left_join(mort_cov, act_cnt_sl, by = "SEQN")
-dim(data_analysis)
-str(data_analysis)
-```
-
-The data frame `data_analysis` contains cleaned activity count data, mortality data, and covariate data of **all study participants** in the NHANES 2003-2004 ("C") and 2005-2006 ("D") waves. Each row represents one study participant. The proportion of missing data varies by type. For different research questions, it is recommended to set corresponding exclusion criteria.
-
-The NHANES data is now ready to use. Enjoy!
-
-Let's start by removing objects we don't care about (e.g. multi-level data) for now and looking at one hour of a subject's aggregated tseries:
+# Filtering down to subjects in wave D with quality controlled AC data and mortality outcome available
 
 ```{r}
 
-# rm(act_cnt_ml, data_analysis, mort_cov, PAXINTEN_C, PAXINTEN_D)
+# IDs of all subs in wave D
+D_ids <- unique(Mortality_2015_D$SEQN) 
 
-AC <- matrix(act_cnt_sl$AC, nrow = nrow(act_cnt_sl), byrow = TRUE)
+# IDs of subs in wave D with quality control passing activity data
+activity_ids <- act_cnt_sl_summary %>%
+  filter(SEQN %in% D_ids) %>%
+  pull(SEQN)
 
-n_minutes <- 60
+# Filter to subs in wave D with mortality data & activity data
+mort_cov_sample <- mort_cov %>%
+  filter(SEQN %in% D_ids) %>% 
+  filter(eligstat==1 & SEQN %in% activity_ids)
 
-sub1 <- data.frame(minute=1:n_minutes, activity=AC[1, 1:60])
+# Extract sample IDs
+sample_ids <- mort_cov_sample %>% pull(SEQN)
 
-ggplot(sub1, aes(x = minute, y = activity)) + geom_line()
+# Filter activity data to sample IDs
+activity_index <- which(act_cnt_sl_summary$SEQN %in% sample_ids)
+act_cnt_sl_summary_sample <- act_cnt_sl_summary[activity_index, ]
+act_cnt_sl_tseries_sample <- act_cnt_sl_tseries[activity_index, ]
 
-write.csv(sub1, "sub1.csv")
+rm(act_cnt_sl_summary, mort_cov, act_cnt_sl_tseries, activity_ids, activity_index, D_ids)
 
 ```
+
+# Binning data into 6 minute bins
 
 Here we bucket the single-level activity into 6 minute bins:
 
 ```{r}
 
-# Convert the matrix to a tibble
-AC_df <- as_tibble(AC)
-
-# Add an observation ID column
-AC_df <- AC_df %>% 
-  mutate(observation_id = row_number())
-
+# Removing the AsIs class attribute manually
+class(act_cnt_sl_tseries_sample) <- setdiff(class(act_cnt_sl_tseries_sample), "AsIs")
+# Optionally convert to matrix if it's still not a matrix
+if (!is.matrix(act_cnt_sl_tseries_sample)) {
+  act_cnt_sl_tseries_sample <- as.matrix(act_cnt_sl_tseries_sample)
+}
+# Check the class of the matrix
+class(act_cnt_sl_tseries_sample)
+# Convert to tibble and add observation ID
+AC_df <- act_cnt_sl_tseries_sample %>% 
+  as.tibble() %>%
+  mutate(SEQN = act_cnt_sl_summary_sample$SEQN)
 # Melt into a long format
 AC_long <- AC_df %>% 
   pivot_longer(
-    -observation_id, 
+    -SEQN, 
     names_to = "minute",
     values_to = "activity_level",
     names_prefix = "minute_"
   ) %>%
-  mutate(minute = str_remove(minute, "V") %>% as.integer()) %>%
+  mutate(minute = str_remove(minute, "MIN") %>% as.integer()) %>%
   mutate(bin_index = (minute - 1) %/% 6 + 1)
-
 # Calculate the mean for each bin
 AC_binned <- AC_long %>%
-  group_by(observation_id, bin_index) %>%
+  group_by(SEQN, bin_index) %>%
   summarise(
     avg_activity = mean(activity_level, na.rm = TRUE)
   ) %>%
@@ -260,8 +271,56 @@ AC_wide <- AC_binned %>%
     names_prefix = "bin_"
   )
 
-# Remove intermediate objects
-# rm(AC_df, AC_long, AC_binned)
+# AC_wide is what is wanted, so we remove intermediate objects
+rm(act_cnt_sl_tseries_sample, AC_df, AC_long, AC_binned)
+
+```
+
+# Split into train, valid, and test sets
+
+The data we want to include in our analyses are contained in the `AC_wide` and `mort_cov_sample` objects, so we need to split these and store them in a form useful for conversion into mtf images and use in CNN-based modeling.
+
+```{r}
+
+set.seed(1251)
+
+# Create indices for the training set (70% of the data)
+train_indices <- createDataPartition(sample_ids, p = 0.70, list = FALSE, times = 1)
+
+# Subset the sample_ids to create the training set
+train_set <- sample_ids[train_indices]
+
+# For validation and test sets, you need to split the remaining 30%
+remaining_ids <- sample_ids[-train_indices]
+
+# Create indices for the validation set (50% of the remaining, which is 15% of total)
+validate_indices <- createDataPartition(remaining_ids, p = 0.50, list = FALSE, times = 1)
+
+# Subset the remaining_ids for validation set
+validate_set <- remaining_ids[validate_indices]
+
+# The rest goes to the test set
+test_set <- remaining_ids[-validate_indices]
+
+# Output the sets
+DataPartitions <- list(train = train_set, validate = validate_set, test = test_set)
+
+# Numbers in each set
+set_size <- sapply(DataPartitions, length)
+print(set_size)
+
+# Make csv
+set_lookup <- data.frame(
+  SEQN=c(DataPartitions$train,
+         DataPartitions$validate,
+         DataPartitions$test),
+  set=c(rep("train", set_size[1]),
+        rep("valid", set_size[2]),
+        rep("test", set_size[3]))
+)
+
+# Store sets
+write.csv(set_lookup, file = "set_lookup.csv")
 
 ```
 
@@ -269,27 +328,30 @@ We re-split our single-level activity data into waves C and D to store them for 
 
 ```{r}
 
-# Re-split activity data into waves C and D
-ids_C <- unique(PAXINTEN_C$SEQN)
-index_C <- which(act_cnt_sl$SEQN %in% ids_C)
-AC_df <- AC_df %>%
-  select(-observation_id) %>%
-  mutate(SEQN = act_cnt_sl$SEQN)
-act_bin_sl_C <- AC_df[index_C, ]
-act_bin_sl_D <- AC_df[-index_C, ]
+# Splitting AC_wide
+AC <- list()
+AC$train <- AC_wide[AC_wide$SEQN %in% DataPartitions$train, ]
+AC$valid <- AC_wide[AC_wide$SEQN %in% DataPartitions$valid, ]
+AC$test <- AC_wide[AC_wide$SEQN %in% DataPartitions$test, ]
 
-# Store single-level averaged and 6-minute binned data
+# Splitting mort_cov_sample
+mort_cov <- list()
+mort_cov$train <- mort_cov_sample[mort_cov_sample$SEQN %in% 
+                              DataPartitions$train, ]
+mort_cov$valid <- mort_cov_sample[mort_cov_sample$SEQN %in% 
+                              DataPartitions$valid, ]
+mort_cov$test <- mort_cov_sample[mort_cov_sample$SEQN %in% 
+                             DataPartitions$test, ]
 
-write.csv(act_bin_sl_C, file = "data/act_bin_sl_C.csv")
-write.csv(act_bin_sl_D, file = "data/act_bin_sl_D.csv")
-
-```
-
-Check mortality missingness/ censoring:
-
-```{r}
-
-Mortality_2015_D$mortstat
-intersect(Mortality_2015_D$SEQN[which(!is.na(Mortality_2015_D$mortstat))], act_bin_sl_D$SEQN) %>% length
+# Store our sample's data for further processing
+split_names <- names(AC)
+for (i in 1:length(split_names)) {
+  write.csv(mort_cov[[i]], 
+            paste0("data/mort_cov_", 
+                   split_names[i], ".csv"))
+  write.csv(AC[[i]], 
+            paste0("data/AC_", 
+                   split_names[i], ".csv"))
+}
 
 ```
