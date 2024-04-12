@@ -12,18 +12,15 @@ editor: visual
 # Load packages
 library(tidyverse)
 library(reticulate) # We use reticulate to load numpy
-
 np <- import("numpy")
-# Use numpy modul to load mtf images
-mtf_images <- np$load("data/mtf_images_D.npy")
-dim(mtf_images)
 
-```
+# Use numpy module to load mtf images
+mtf_images <- np$load("data/mtf_images_valid.npy")
+mort_cov <- read.csv("data/mort_cov_valid.csv")
+outcome_label <- ifelse(mort_cov$mortstat==1, "dead", "alive")
+subject_keys <- mort_cov$SEQN
 
-## Visualize MTF Images
-
-```{r}
-
+# Make heatmaps from matrices
 make_mtf_heatmap <- function(image_matrix) {
   # Reshape `image_matrix` (240x240 matrix)
   image_data <- image_matrix %>%
@@ -44,26 +41,16 @@ make_mtf_heatmap <- function(image_matrix) {
           legend.position = "none") # Hide axis titles
   return(mtf_heatmap)
 }
-
-# Plot 3 subjects' mtf images
-# n_images <- dim(mtf_images)[1]
-# set.seed(1) 
-# subs_to_plot <- sample(1:n_images, 3)
-# mtf_images_to_plot <- mtf_images[subs_to_plot, , ]
-mtf_images_to_plot <- mtf_images[1:3, , ]
-
-mtf_heatmaps <- apply(mtf_images_to_plot, 1, make_mtf_heatmap)
-
-library(patchwork) # For plotting on one figure 
-combined_plot <- mtf_heatmaps[[1]] + 
-  mtf_heatmaps[[2]] + mtf_heatmaps[[3]] + 
-  plot_layout(ncol = 3) +
-  theme(legend.position = "bottom")
-
-combined_plot
-
-ggsave("figures/combined_heatmaps_with_single_legend.png",
-       combined_plot, width = 20, height = 7, units = "cm")
+mtf_heatmaps <- apply(mtf_images, 1, make_mtf_heatmap)
+# Save as images
+set_label <- "valid"
+for (i in 1:length(subject_keys)) {
+  fname_i <- paste0("data/", set_label, "/", 
+                    outcome_label[i], "/", 
+                    subject_keys[i], ".png")
+  ggsave(fname_i, mtf_heatmaps[[i]], 
+         width = 20, height = 7, units = "cm")
+}
 
 ```
 
